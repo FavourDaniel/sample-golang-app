@@ -1,10 +1,13 @@
 package controllers
 
 import (
+	"context"
+	"fmt"
 	"net/http"
 
 	"github.com/SigNoz/sample-golang-app/models"
 	"github.com/gin-gonic/gin"
+	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -23,11 +26,35 @@ type UpdateBookInput struct {
 // Find all books
 func FindBooks(c *gin.Context) {
 	var books []models.Book
-	span := trace.SpanFromContext(c.Request.Context())
+	ctx := c.Request.Context()
+	tracer := otel.Tracer("github.com/SigNoz/sample-golang-app/controllers")
+
+	// Start with the root span
+	ctx, rootSpan := tracer.Start(ctx, "FindBooks-root")
+	defer rootSpan.End()
+
+	// Create 1000 nested spans
+	createNestedSpans(ctx, tracer, 1000, 0)
+
+	span := trace.SpanFromContext(ctx)
 	span.SetAttributes(attribute.String("controller", "books"))
 	span.AddEvent("This is a sample event", trace.WithAttributes(attribute.Int("pid", 4328), attribute.String("sampleAttribute", "Test")))
-	models.DB.WithContext(c.Request.Context()).Find(&books)
+	models.DB.WithContext(ctx).Find(&books)
 	c.JSON(http.StatusOK, gin.H{"data": books})
+}
+
+func createNestedSpans(ctx context.Context, tracer trace.Tracer, remaining int, current int) {
+	if remaining == 0 {
+		return
+	}
+
+	_, span := tracer.Start(ctx, fmt.Sprintf("nested-span-%d", current))
+	defer span.End()
+
+	span.SetAttributes(attribute.Int("depth", current))
+
+	// Recursively create the next nested span using the current span's context
+	createNestedSpans(trace.ContextWithSpan(ctx, span), tracer, remaining-1, current+1)
 }
 
 // GET /books/:id
