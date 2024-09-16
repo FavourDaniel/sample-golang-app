@@ -9,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -29,46 +30,35 @@ func FindBooks(c *gin.Context) {
 	ctx := c.Request.Context()
 	tracer := otel.Tracer("github.com/SigNoz/sample-golang-app/controllers")
 
-	// Start with the root span
 	ctx, rootSpan := tracer.Start(ctx, "FindBooks-root")
 	defer rootSpan.End()
 
-	// Create 20000 nested spans
-	createFlatSpans(ctx, tracer, 20000, 0)
+	totalSpans := 20000
+	batchSize := 1000
+	for i := 0; i < totalSpans; i += batchSize {
+		count := batchSize
+		if i+batchSize > totalSpans {
+			count = totalSpans - i
+		}
+		createFlatSpansIterative(ctx, tracer, count, i)
 
-	// span := trace.SpanFromContext(ctx)
-	// span.SetAttributes(attribute.String("controller", "books"))
-	// span.AddEvent("This is a sample event", trace.WithAttributes(attribute.Int("pid", 4328), attribute.String("sampleAttribute", "Test")))
+		// Force flush after each batch
+		otel.GetTextMapPropagator().Inject(ctx, propagation.HeaderCarrier(c.Writer.Header()))
+	}
+
 	models.DB.WithContext(ctx).Find(&books)
 	c.JSON(http.StatusOK, gin.H{"data": books})
 }
 
-func createNestedSpans(ctx context.Context, tracer trace.Tracer, remaining int, current int) {
-	if remaining == 0 {
-		return
+func createFlatSpansIterative(ctx context.Context, tracer trace.Tracer, count, offset int) {
+	for i := 0; i < count; i++ {
+		_, span := tracer.Start(ctx, fmt.Sprintf("flat-span-%d", offset+i))
+		span.SetAttributes(attribute.Int("numbered", offset+i))
+		span.End()
+		if (offset+i+1)%1000 == 0 {
+			fmt.Printf("Created span %d\n", offset+i+1)
+		}
 	}
-
-	_, span := tracer.Start(ctx, fmt.Sprintf("nested-span-%d", current))
-	defer span.End()
-
-	span.SetAttributes(attribute.Int("depth", current))
-
-	// Recursively create the next nested span using the current span's context
-	createNestedSpans(trace.ContextWithSpan(ctx, span), tracer, remaining-1, current+1)
-}
-
-func createFlatSpans(ctx context.Context, tracer trace.Tracer, remaining int, current int) {
-	if remaining == 0 {
-		return
-	}
-
-	_, span := tracer.Start(ctx, fmt.Sprintf("flat-span-%d", current))
-	defer span.End()
-
-	span.SetAttributes(attribute.Int("numbered", current))
-
-	// Recursively create the next nested span using the current span's context
-	createFlatSpans(ctx, tracer, remaining-1, current+1)
 }
 
 // GET /books/:id

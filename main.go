@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/SigNoz/sample-golang-app/controllers"
 	"github.com/SigNoz/sample-golang-app/metrics"
@@ -63,8 +64,21 @@ func initTracer() func(context.Context) error {
 	otel.SetTracerProvider(
 		sdktrace.NewTracerProvider(
 			sdktrace.WithSampler(sdktrace.AlwaysSample()),
-			sdktrace.WithBatcher(exporter),
+			sdktrace.WithBatcher(exporter,
+				sdktrace.WithMaxExportBatchSize(10000),
+				sdktrace.WithBatchTimeout(5*time.Second),
+				sdktrace.WithMaxQueueSize(100000),
+			),
 			sdktrace.WithResource(resources),
+			// Remove the following lines:
+			// sdktrace.WithBatchSpanProcessor(
+			// 	sdktrace.NewBatchSpanProcessor(
+			// 		exporter,
+			// 		// // Check these options:
+			// 		// sdktrace.WithMaxQueueSize(2560),
+			// 		// sdktrace.WithMaxExportBatchSize(2560),
+			// 	),
+			// ),
 		),
 	)
 	return exporter.Shutdown
