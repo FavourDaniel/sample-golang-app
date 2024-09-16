@@ -33,12 +33,12 @@ func FindBooks(c *gin.Context) {
 	ctx, rootSpan := tracer.Start(ctx, "FindBooks-root")
 	defer rootSpan.End()
 
-	// Create 1000 nested spans
-	createNestedSpans(ctx, tracer, 1000, 0)
+	// Create 20000 nested spans
+	createFlatSpans(ctx, tracer, 20000, 0)
 
-	span := trace.SpanFromContext(ctx)
-	span.SetAttributes(attribute.String("controller", "books"))
-	span.AddEvent("This is a sample event", trace.WithAttributes(attribute.Int("pid", 4328), attribute.String("sampleAttribute", "Test")))
+	// span := trace.SpanFromContext(ctx)
+	// span.SetAttributes(attribute.String("controller", "books"))
+	// span.AddEvent("This is a sample event", trace.WithAttributes(attribute.Int("pid", 4328), attribute.String("sampleAttribute", "Test")))
 	models.DB.WithContext(ctx).Find(&books)
 	c.JSON(http.StatusOK, gin.H{"data": books})
 }
@@ -55,6 +55,20 @@ func createNestedSpans(ctx context.Context, tracer trace.Tracer, remaining int, 
 
 	// Recursively create the next nested span using the current span's context
 	createNestedSpans(trace.ContextWithSpan(ctx, span), tracer, remaining-1, current+1)
+}
+
+func createFlatSpans(ctx context.Context, tracer trace.Tracer, remaining int, current int) {
+	if remaining == 0 {
+		return
+	}
+
+	_, span := tracer.Start(ctx, fmt.Sprintf("flat-span-%d", current))
+	defer span.End()
+
+	span.SetAttributes(attribute.Int("numbered", current))
+
+	// Recursively create the next nested span using the current span's context
+	createFlatSpans(ctx, tracer, remaining-1, current+1)
 }
 
 // GET /books/:id

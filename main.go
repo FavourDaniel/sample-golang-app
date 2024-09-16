@@ -70,7 +70,7 @@ func initTracer() func(context.Context) error {
 	return exporter.Shutdown
 }
 
-func main2() {
+func main() {
 
 	cleanup := initTracer()
 	defer cleanup(context.Background())
