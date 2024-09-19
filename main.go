@@ -5,49 +5,48 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"time"
 
 	"github.com/honeycombio/otel-config-go/otelconfig"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
 )
 
-func createFlatSpans(ctx context.Context, tracer trace.Tracer, remaining int, current int) {
-	if remaining == 0 {
-		return
+func createFlatSpansIterative(ctx context.Context, tracer trace.Tracer, count, offset int) {
+	for i := 0; i < count; i++ {
+		_, span := tracer.Start(ctx, fmt.Sprintf("flat-span-%d", offset+i))
+		span.SetAttributes(attribute.Int("numbered", offset+i))
+		span.End()
+		if (offset+i+1)%1000 == 0 {
+			fmt.Printf("Created span %d\n", offset+i+1)
+		}
 	}
-	// time.Sleep(10 * time.Millisecond)
-	_, span := tracer.Start(ctx, fmt.Sprintf("flat-span-%d", current))
-	defer span.End()
-
-	span.SetAttributes(attribute.Int("flat-number", current))
-
-	// Recursively create the next nested span using the current span's context
-	createFlatSpans(ctx, tracer, remaining-1, current+1)
 }
 
-// Implement an HTTP Handler func to be instrumented
-func httpHandler(w http.ResponseWriter, r *http.Request) {
+// Rename the function to avoid redeclaration
+func httpHandlerWithSpans(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	tracer := otel.Tracer("github.com/SigNoz/sample-golang-app/controllers")
-
 	// Start with the root span
 	ctx, rootSpan := tracer.Start(ctx, "FindBooks-root")
 	defer rootSpan.End()
 
-	// Create 20000 nested spans
-	createFlatSpans(ctx, tracer, 20000, 0)
-	time.Sleep(10 * time.Second)
-	fmt.Fprintf(w, "Hello, World")
-}
+	totalSpans := 20000
+	batchSize := 1000
+	for i := 0; i < totalSpans; i += batchSize {
+		count := batchSize
+		if i+batchSize > totalSpans {
+			count = totalSpans - i
+		}
+		createFlatSpansIterative(ctx, tracer, count, i)
 
-// Wrap the HTTP handler func with OTel HTTP instrumentation
-func wrapHandler() {
-	handler := http.HandlerFunc(httpHandler)
-	wrappedHandler := otelhttp.NewHandler(handler, "hello")
-	http.Handle("/hello", wrappedHandler)
+		// Force flush after each batch
+		otel.GetTextMapPropagator().Inject(ctx, propagation.HeaderCarrier(w.Header()))
+	}
+
+	fmt.Fprintf(w, "Hello, World")
 }
 
 func main() {
@@ -59,6 +58,9 @@ func main() {
 	defer otelShutdown()
 
 	// Initialize HTTP handler instrumentation
-	wrapHandler()
+	handler := http.HandlerFunc(httpHandlerWithSpans)
+	wrappedHandler := otelhttp.NewHandler(handler, "hello")
+	http.Handle("/hello", wrappedHandler)
+
 	log.Fatal(http.ListenAndServe(":3030", nil))
 }
